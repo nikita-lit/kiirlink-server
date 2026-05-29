@@ -5,8 +5,10 @@ services:
     ports:
       - "80:8080"
     volumes:
-      - ./data:/app/data
+      - kiirlink_data:/app/data
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-    user: "1654:1654"
     restart: always
+
+volumes:
+  kiirlink_data:
