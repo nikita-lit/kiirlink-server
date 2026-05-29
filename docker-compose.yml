@@ -8,4 +8,5 @@ services:
       - ./data:/app/data
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
+    user: "1654:1654"
     restart: always
