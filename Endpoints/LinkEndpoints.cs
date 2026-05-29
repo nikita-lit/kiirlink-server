@@ -9,7 +9,8 @@ public static class LinkEndpoints
 {
     public static void MapLinkEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/links");
+        var group = app.MapGroup("/api/links")
+            .WithTags("Links");
 
         group.MapPost("/shorten", ShortenLongUrl)
             .RequireAuthorization()

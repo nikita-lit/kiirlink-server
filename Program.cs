@@ -42,13 +42,19 @@ public static class Program
         });
         
         var app = BuildApp(builder);
-        app.MapLinkEndpoints();
         app.Run();
     }
 
     private static WebApplication BuildApp(WebApplicationBuilder builder)
     {
         var app = builder.Build();
+        
+        using (var scope = app.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<DbContext>();
+            if (db.Database.GetPendingMigrations().Any())
+                db.Database.Migrate();
+        }
 
         if (app.Environment.IsDevelopment())
         {
@@ -68,6 +74,8 @@ public static class Program
         app.MapGroup("/auth")
             .MapIdentityApi<User>()
             .WithTags("Authentication");
+        
+        app.MapLinkEndpoints();
 
         return app;
     }
