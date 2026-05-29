@@ -30,7 +30,7 @@ namespace KiirlinkServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("LinkId")
+                    b.Property<int?>("LinkId")
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
@@ -89,11 +89,11 @@ namespace KiirlinkServer.Migrations
                     b.Property<int?>("CategoryId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("ClickCount")
-                        .HasColumnType("INTEGER");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("OriginalUrl")
                         .IsRequired()
@@ -343,9 +343,7 @@ namespace KiirlinkServer.Migrations
                 {
                     b.HasOne("KiirlinkServer.Models.Link", "Link")
                         .WithMany("ActivityLogs")
-                        .HasForeignKey("LinkId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("LinkId");
 
                     b.Navigation("Link");
                 });

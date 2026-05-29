@@ -8,7 +8,7 @@ public class Link
     public string OriginalUrl { get; set; } = string.Empty;
     public string ShortUrl { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
-    public int ClickCount { get; set; }
+    public bool IsDeleted { get; set; } = false;
     
     public User User { get; set; } = null!;
     public Category? Category { get; set; }

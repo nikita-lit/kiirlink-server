@@ -181,7 +181,7 @@ namespace KiirlinkServer.Migrations
                     OriginalUrl = table.Column<string>(type: "TEXT", nullable: false),
                     ShortUrl = table.Column<string>(type: "TEXT", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
-                    ClickCount = table.Column<int>(type: "INTEGER", nullable: false)
+                    IsDeleted = table.Column<bool>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -205,7 +205,7 @@ namespace KiirlinkServer.Migrations
                 {
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
-                    LinkId = table.Column<int>(type: "INTEGER", nullable: false),
+                    LinkId = table.Column<int>(type: "INTEGER", nullable: true),
                     Action = table.Column<string>(type: "TEXT", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
@@ -216,8 +216,7 @@ namespace KiirlinkServer.Migrations
                         name: "FK_ActivityLogs_Links_LinkId",
                         column: x => x.LinkId,
                         principalTable: "Links",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        principalColumn: "Id");
                 });
 
             migrationBuilder.CreateTable(
