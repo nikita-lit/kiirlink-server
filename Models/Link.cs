@@ -9,6 +9,8 @@ public class Link
     public string ShortUrl { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public bool IsDeleted { get; set; } = false;
+    public DateTime? ExpiresAt { get; set; }
+    public bool IsPublic { get; set; } = false;
 
     public User User { get; set; } = null!;
     public Category? Category { get; set; }

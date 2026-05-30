@@ -14,16 +14,19 @@ public static class LinkEndpoints
             .WithTags( "Links" );
 
         group.MapPost( "/shorten", ShortenLongUrl )
-            .WithName( "CreateShortUrl" );
+            .WithName( "ShortenLongUrl" );
 
-        group.MapGet( "/get", GetUrls )
-            .WithName( "GetUrls" );
+        group.MapGet( "/get", GetShortUrls )
+            .WithName( "GetShortUrls" );
 
         group.MapPost( "/remove", RemoveShortUrl )
             .WithName( "RemoveShortUrl" );
 
         group.MapGet( "/{id:int}/stats", GetLinkStats )
             .WithName( "GetLinkStats" );
+
+        group.MapGet( "/{id:int}/activity", GetLinkActivity )
+            .WithName( "GetLinkActivity" );
 
         // Favourites
         group.MapGet( "/favourites", GetFavourites )
@@ -54,7 +57,9 @@ public static class LinkEndpoints
     }
 
     private static async Task<IResult> ShortenLongUrl(
-        string longUrl,
+        string originalUrl,
+        DateTime? expiresAt,
+        bool? isPublic,
         DbContext db,
         ClaimsPrincipal user )
     {
@@ -62,13 +67,22 @@ public static class LinkEndpoints
         if ( string.IsNullOrEmpty( userId ) )
             return Results.Unauthorized();
 
-        var shortUrl = Guid.NewGuid().ToString()[..6];
+        if ( !Uri.TryCreate( originalUrl, UriKind.Absolute, out var uriResult ) ||
+             (uriResult.Scheme != Uri.UriSchemeHttp && uriResult.Scheme != Uri.UriSchemeHttps) )
+            return Results.BadRequest( new { Message = "Invalid URL format." } );
+
+        var shortUrl = Guid.NewGuid().ToString( "N" )[..6];
+        while ( await db.Links.AnyAsync( l => l.ShortUrl == shortUrl ) )
+            shortUrl = Guid.NewGuid().ToString( "N" )[..6];
+
         var newLink = new Link
         {
-            OriginalUrl = longUrl,
+            OriginalUrl = originalUrl,
             ShortUrl = shortUrl,
             UserId = userId,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = expiresAt,
+            IsPublic = isPublic ?? false
         };
 
         db.Links.Add( newLink );
@@ -87,7 +101,10 @@ public static class LinkEndpoints
             new { newLink.ShortUrl, newLink.OriginalUrl, newLink.CreatedAt } );
     }
 
-    private static async Task<IResult> GetUrls(
+    private static async Task<IResult> GetShortUrls(
+        int? page,
+        int? limit,
+        int? categoryId,
         DbContext db,
         ClaimsPrincipal user )
     {
@@ -95,21 +112,40 @@ public static class LinkEndpoints
         if ( string.IsNullOrEmpty( userId ) )
             return Results.Unauthorized();
 
-        var links = await db.Links
-            .Where( l => !l.IsDeleted )
-            .Where( l => l.UserId == userId )
+        var query = db.Links
+            .Where( l => !l.IsDeleted && l.UserId == userId );
+
+        if ( categoryId.HasValue )
+            query = query.Where( l => l.CategoryId == categoryId.Value );
+
+        var totalCount = await query.CountAsync();
+
+        var itemsPerPage = limit ?? 10;
+        var currentPage = page ?? 1;
+
+        var links = await query
+            .OrderByDescending( l => l.CreatedAt )
+            .Skip( (currentPage - 1) * itemsPerPage )
+            .Take( itemsPerPage )
             .Select( l => new
             {
                 l.Id,
                 l.OriginalUrl,
                 l.ShortUrl,
                 l.CreatedAt,
+                l.ExpiresAt,
+                l.IsPublic,
                 Category = l.Category == null ? null : l.Category.Name,
                 ClickCount = l.LinkClicks.Count
             } )
             .ToListAsync();
 
-        return Results.Ok( links );
+        return Results.Ok( new
+        {
+            items = links,
+            totalCount,
+            totalPages = (int)Math.Ceiling( totalCount / (double)itemsPerPage )
+        } );
     }
 
     private static async Task<IResult> RemoveShortUrl(
@@ -153,6 +189,7 @@ public static class LinkEndpoints
 
         var link = await db.Links
             .Include( l => l.LinkClicks )
+            .Include( l => l.Favourites )
             .FirstOrDefaultAsync( l => l.Id == id && l.UserId == userId && !l.IsDeleted );
 
         if ( link == null )
@@ -165,6 +202,10 @@ public static class LinkEndpoints
             link.OriginalUrl,
             link.CreatedAt,
             TotalClicks = link.LinkClicks.Count,
+            FavouritesCount = link.Favourites.Count,
+            ByDate = link.LinkClicks
+                .GroupBy( c => c.ClickedAt.Date )
+                .Select( g => new { Date = g.Key.ToString( "yyyy-MM-dd" ), Count = g.Count() } ),
             ByDevice = link.LinkClicks
                 .GroupBy( c => c.DeviceType )
                 .Select( g => new { Device = g.Key, Count = g.Count() } ),
@@ -177,6 +218,42 @@ public static class LinkEndpoints
         };
 
         return Results.Ok( stats );
+    }
+
+    private static async Task<IResult> GetLinkActivity(
+        int id,
+        DbContext db,
+        ClaimsPrincipal user )
+    {
+        var userId = user.FindFirst( ClaimTypes.NameIdentifier )?.Value;
+        if ( string.IsNullOrEmpty( userId ) )
+            return Results.Unauthorized();
+
+        var link = await db.Links.FirstOrDefaultAsync( l => l.Id == id && l.UserId == userId && !l.IsDeleted );
+        if ( link == null )
+            return Results.NotFound( new { Message = "Link not found." } );
+
+        var clicks = await db.LinkClicks
+            .Where( c => c.LinkId == id )
+            .Select( c => new
+            {
+                Type = "Click",
+                Description = $"Clicked from {c.DeviceType ?? "unknown device"} in {c.Country ?? "unknown country"}",
+                Date = c.ClickedAt
+            } )
+            .ToListAsync();
+
+        var activities = await db.ActivityLogs
+            .Where( a => a.LinkId == id )
+            .Select( a => new { Type = "Activity", Description = a.Action, Date = a.CreatedAt } )
+            .ToListAsync();
+
+        var history = clicks.Concat( activities )
+            .OrderByDescending( x => x.Date )
+            .Take( 50 )
+            .ToList();
+
+        return Results.Ok( history );
     }
 
     private static async Task<IResult> GetFavourites(
@@ -393,12 +470,13 @@ public static class LinkEndpoints
         HttpContext httpContext,
         IHttpClientFactory clientFactory )
     {
-        var link = await db.Links
-            .Where( l => !l.IsDeleted )
-            .FirstOrDefaultAsync( l => l.ShortUrl == shortUrl );
+        var link = await db.Links.FirstOrDefaultAsync( l => l.ShortUrl == shortUrl );
 
-        if ( link == null )
-            return Results.NotFound( new { Message = "The link was not found or is out of date." } );
+        if ( link == null || link.IsDeleted )
+            return Results.NotFound();
+
+        if ( link.ExpiresAt.HasValue && link.ExpiresAt.Value < DateTime.UtcNow )
+            return Results.StatusCode( 410 );
 
         var ipAddress = httpContext.Connection.RemoteIpAddress?.ToString();
 

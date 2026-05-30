@@ -9,9 +9,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Remove="ApiTest\**" />
-        <Content Remove="ApiTest\**" />
-        <None Remove="ApiTest\**" />
+        <Compile Remove="Test\**"/>
+        <Content Remove="Test\**"/>
+        <None Remove="Test\**"/>
     </ItemGroup>
 
     <ItemGroup>
@@ -26,9 +26,9 @@
     </ItemGroup>
 
     <ItemGroup>
-      <_ContentIncludedByDefault Remove="ApiTest\obj\ApiTest.csproj.nuget.dgspec.json" />
-      <_ContentIncludedByDefault Remove="ApiTest\obj\Debug\net10.0\ApiTest.sourcelink.json" />
-      <_ContentIncludedByDefault Remove="ApiTest\obj\project.assets.json" />
+        <_ContentIncludedByDefault Remove="ApiTest\obj\ApiTest.csproj.nuget.dgspec.json"/>
+        <_ContentIncludedByDefault Remove="ApiTest\obj\Debug\net10.0\ApiTest.sourcelink.json"/>
+        <_ContentIncludedByDefault Remove="ApiTest\obj\project.assets.json"/>
     </ItemGroup>
 
 </Project>

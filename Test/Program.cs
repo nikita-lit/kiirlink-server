@@ -172,7 +172,7 @@ else
 
 Section( "Links — shorten & list" );
 
-var (shortenStatus, shortenBody) = await POST( "/api/links/shorten?longUrl=https://www.google.com/" );
+var (shortenStatus, shortenBody) = await POST( $"/api/links/shorten?originalUrl=https://www.google.com/&isPublic=true" );
 
 if ( shortenStatus == HttpStatusCode.Created && shortenBody.HasValue )
 {
@@ -184,19 +184,20 @@ else
     Fail( "POST /api/links/shorten", $"{(int)shortenStatus}" );
 }
 
-var (getStatus, getBody) = await GET( "/api/links/get" );
-if ( getStatus == HttpStatusCode.OK && getBody.HasValue && getBody.Value.ValueKind == JsonValueKind.Array )
+var (getStatus, getBody) = await GET( "/api/links/get?page=1&limit=10" );
+if ( getStatus == HttpStatusCode.OK && getBody.HasValue && getBody.Value.TryGetProperty( "items", out var itemsList ) && itemsList.ValueKind == JsonValueKind.Array )
 {
-    var count = getBody.Value.GetArrayLength();
+    var count = itemsList.GetArrayLength();
+    var totalCount = getBody.Value.GetProperty( "totalCount" ).GetInt32();
 
-    foreach ( var item in getBody.Value.EnumerateArray() )
+    foreach ( var item in itemsList.EnumerateArray() )
         if ( item.TryGetProperty( "shortUrl", out var su ) && su.GetString() == shortUrl )
         {
             linkId = item.GetProperty( "id" ).GetInt32();
             break;
         }
 
-    Pass( $"GET /api/links/get  →  {count} link(s), our id = {linkId}" );
+    Pass( $"GET /api/links/get  →  {count} link(s) (total {totalCount}), our id = {linkId}" );
 }
 else
 {
@@ -211,7 +212,9 @@ if ( linkId > 0 )
     if ( statsStatus == HttpStatusCode.OK && statsBody.HasValue )
     {
         var clicks = statsBody.Value.GetProperty( "totalClicks" ).GetInt32();
-        Pass( $"GET /api/links/{linkId}/stats  →  totalClicks = {clicks}" );
+        var favCount = statsBody.Value.GetProperty( "favouritesCount" ).GetInt32();
+        var hasByDate = statsBody.Value.TryGetProperty( "byDate", out _ );
+        Pass( $"GET /api/links/{linkId}/stats  →  totalClicks = {clicks}, favCount = {favCount}, hasByDate = {hasByDate}" );
     }
     else
     {
@@ -223,6 +226,17 @@ if ( linkId > 0 )
         Pass( "GET /api/links/99999/stats  →  404 (correct)" );
     else
         Fail( "GET /api/links/99999/stats", $"expected 404, got {(int)statsNotFoundStatus}" );
+
+    var (activityStatus, activityBody) = await GET( $"/api/links/{linkId}/activity" );
+    if ( activityStatus == HttpStatusCode.OK && activityBody.HasValue && activityBody.Value.ValueKind == JsonValueKind.Array )
+    {
+        var activityCount = activityBody.Value.GetArrayLength();
+        Pass( $"GET /api/links/{linkId}/activity  →  {activityCount} event(s)" );
+    }
+    else
+    {
+        Fail( $"GET /api/links/{linkId}/activity", $"{(int)activityStatus}" );
+    }
 }
 else
 {
@@ -239,6 +253,24 @@ if ( shortUrl is not null )
         Pass( $"GET /{shortUrl}  →  {(int)redirStatus} redirect to original URL" );
     else
         Fail( $"GET /{shortUrl}", $"expected 3xx, got {(int)redirStatus}" );
+
+    // Expired link test
+    var pastDate = DateTime.UtcNow.AddMinutes(-10).ToString("O");
+    var (expStatus, expBody) = await POST($"/api/links/shorten?originalUrl=https://google.com/&expiresAt={pastDate}");
+    
+    if (expStatus == HttpStatusCode.Created && expBody.HasValue)
+    {
+        var expiredAlias = expBody.Value.GetProperty("shortUrl").GetString();
+        var (expRedir, _) = await GET($"/{expiredAlias}", false);
+        if (expRedir == HttpStatusCode.Gone)
+            Pass($"GET /{expiredAlias} (expired)  →  410 Gone (correct)");
+        else
+            Fail($"GET /{expiredAlias} (expired)", $"expected 410, got {(int)expRedir}");
+    }
+    else
+    {
+        Fail("POST /api/links/shorten (expired)", $"failed to create expired link: {(int)expStatus}");
+    }
 }
 else
 {
@@ -320,16 +352,22 @@ if ( linkId > 0 && categoryId > 0 )
         Fail( "PUT /api/links/{id}/category", $"{(int)assignStatus} {assignBody}" );
     
     var (getAfterStatus, getAfterBody) = await GET( "/api/links/get" );
-    if ( getAfterStatus == HttpStatusCode.OK && getAfterBody.HasValue )
-        foreach ( var cat in from item in getAfterBody.Value.EnumerateArray() where item.GetProperty( "id" ).GetInt32() == linkId select item.GetProperty( "category" ).GetString() )
+    if ( getAfterStatus == HttpStatusCode.OK && getAfterBody.HasValue && getAfterBody.Value.TryGetProperty( "items", out var itemsGet ) )
+    {
+        var foundCat = false;
+        foreach ( var cat in from item in itemsGet.EnumerateArray() where item.GetProperty( "id" ).GetInt32() == linkId select item.GetProperty( "category" ).GetString() )
         {
             if ( cat == catName )
                 Pass( $"GET /api/links/get  →  category = '{cat}' (correct)" );
             else
                 Fail( "GET /api/links/get category check", $"expected '{catName}', got '{cat}'" );
             
+            foundCat = true;
             break;
         }
+        if (!foundCat) Fail("GET /api/links/get category check", "link not found");
+    }
+    else Fail("GET /api/links/get category check", "failed to fetch get urls");
     
     var (unassignStatus, _) = await PUT( $"/api/links/{linkId}/category" );
     
@@ -371,12 +409,15 @@ if ( linkId > 0 )
     if ( getAfterRemove == HttpStatusCode.OK && getBody2.HasValue )
     {
         var found = false;
-        foreach ( var item in getBody2.Value.EnumerateArray() )
-            if ( item.GetProperty( "id" ).GetInt32() == linkId )
-            {
-                found = true;
-                break;
-            }
+        if ( getBody2.Value.TryGetProperty( "items", out var itemsAfter ) )
+        {
+            foreach ( var item in itemsAfter.EnumerateArray() )
+                if ( item.GetProperty( "id" ).GetInt32() == linkId )
+                {
+                    found = true;
+                    break;
+                }
+        }
 
         if ( !found )
             Pass( "GET /api/links/get after remove  →  link not in list (correct)" );
