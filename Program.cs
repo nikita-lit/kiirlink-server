@@ -1,80 +1,80 @@
-using Microsoft.EntityFrameworkCore;
-using Scalar.AspNetCore;
-using KiirlinkServer.Models;
 using KiirlinkServer.Endpoints;
-using Microsoft.AspNetCore.Identity;
+using KiirlinkServer.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
+using Scalar.AspNetCore;
 
 namespace KiirlinkServer;
 
 public static class Program
 {
-    public static void Main(string[] args)
+    public static void Main( string[] args )
     {
-        var builder = WebApplication.CreateBuilder(args);
+        var builder = WebApplication.CreateBuilder( args );
         builder.Services.AddHttpClient();
-        
-        var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
-                               ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
-        
-        builder.Services.AddDbContext<DbContext>(options =>
-            options.UseSqlite(connectionString));
-        
+
+        var connectionString = builder.Configuration.GetConnectionString( "DefaultConnection" )
+                               ?? throw new InvalidOperationException(
+                                   "Connection string 'DefaultConnection' not found." );
+
+        builder.Services.AddDbContext<DbContext>( options =>
+            options.UseSqlite( connectionString ) );
+
         builder.Services.AddAuthentication();
         builder.Services.AddAuthorization();
-        
+
         builder.Services.AddIdentityApiEndpoints<User>()
             .AddEntityFrameworkStores<DbContext>();
-        
-        builder.Services.AddOpenApi(options =>
+
+        builder.Services.AddOpenApi( options =>
         {
             options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
-            
-            options.AddOperationTransformer((operation, _, _) =>
+
+            options.AddOperationTransformer( ( operation, _, _ ) =>
             {
                 operation.Security ??= [];
-                operation.Security.Add(new OpenApiSecurityRequirement
+                operation.Security.Add( new OpenApiSecurityRequirement
                 {
-                    [new OpenApiSecuritySchemeReference("Bearer")] = []
-                });
+                    [new OpenApiSecuritySchemeReference( "Bearer" )] = []
+                } );
                 return Task.CompletedTask;
-            });
-        });
-        
-        var app = BuildApp(builder);
+            } );
+        } );
+
+        var app = BuildApp( builder );
         app.Run();
     }
 
-    private static WebApplication BuildApp(WebApplicationBuilder builder)
+    private static WebApplication BuildApp( WebApplicationBuilder builder )
     {
         var app = builder.Build();
-        
-        using (var scope = app.Services.CreateScope())
+
+        using ( var scope = app.Services.CreateScope() )
         {
             var db = scope.ServiceProvider.GetRequiredService<DbContext>();
-            if (db.Database.GetPendingMigrations().Any())
+            if ( db.Database.GetPendingMigrations().Any() )
                 db.Database.Migrate();
         }
 
-        if (app.Environment.IsDevelopment())
+        if ( app.Environment.IsDevelopment() )
         {
             app.MapOpenApi();
-            app.MapScalarApiReference(options =>
+            app.MapScalarApiReference( options =>
             {
                 options.Authentication = new ScalarAuthenticationOptions
                 {
                     PreferredSecuritySchemes = ["Bearer"]
                 };
-            });
+            } );
         }
 
         app.UseHttpsRedirection();
         app.UseAuthorization();
-        
-        app.MapGroup("/auth")
+
+        app.MapGroup( "/api/auth" )
             .MapIdentityApi<User>()
-            .WithTags("Authentication");
-        
+            .WithTags( "Authentication" );
+
         app.MapLinkEndpoints();
 
         return app;
