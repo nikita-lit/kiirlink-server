@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KiirlinkServer.Endpoints;
 
-public static class LinkEndpoints
+public static partial class LinkEndpoints
 {
     public static void MapLinkEndpoints( this IEndpointRouteBuilder app )
     {
@@ -27,30 +27,10 @@ public static class LinkEndpoints
 
         group.MapGet( "/{id:int}/activity", GetLinkActivity )
             .WithName( "GetLinkActivity" );
-
-        // Favourites
-        group.MapGet( "/favourites", GetFavourites )
-            .WithName( "GetFavourites" );
-
-        group.MapPost( "/favourite", AddFavouriteLink )
-            .WithName( "AddFavouriteLink" );
-
-        group.MapPost( "/unfavourite", RemoveFavouriteLink )
-            .WithName( "RemoveFavouriteLink" );
-
-        // Categories
-        group.MapGet( "/categories", GetCategories )
-            .WithName( "GetCategories" );
-
-        group.MapPost( "/category", AddCategory )
-            .WithName( "AddCategory" );
-
-        group.MapDelete( "/category/{id:int}", DeleteCategory )
-            .WithName( "DeleteCategory" );
-
-        group.MapPut( "/{id:int}/category", AssignCategory )
-            .WithName( "AssignCategory" );
-
+        
+        MapFavouritesEndpoints( group );
+        MapCategoriesEndpoints( group );
+        
         app.MapGet( "/{shortUrl}", RedirectToOriginalUrl )
             .WithName( "RedirectToOriginalUrl" )
             .WithTags( "Links" );
@@ -254,214 +234,6 @@ public static class LinkEndpoints
             .ToList();
 
         return Results.Ok( history );
-    }
-
-    private static async Task<IResult> GetFavourites(
-        DbContext db,
-        ClaimsPrincipal user )
-    {
-        var userId = user.FindFirst( ClaimTypes.NameIdentifier )?.Value;
-        if ( string.IsNullOrEmpty( userId ) )
-            return Results.Unauthorized();
-
-        var favourites = await db.Favourites
-            .Where( f => f.UserId == userId )
-            .Where( f => !f.Link.IsDeleted )
-            .Select( f => new
-            {
-                f.Id,
-                f.LinkId,
-                f.Link.ShortUrl,
-                f.Link.OriginalUrl,
-                f.CreatedAt
-            } )
-            .ToListAsync();
-
-        return Results.Ok( favourites );
-    }
-
-    private static async Task<IResult> AddFavouriteLink(
-        int linkId,
-        DbContext db,
-        ClaimsPrincipal user )
-    {
-        var userId = user.FindFirst( ClaimTypes.NameIdentifier )?.Value;
-        if ( string.IsNullOrEmpty( userId ) )
-            return Results.Unauthorized();
-
-        var link = await db.Links
-            .FirstOrDefaultAsync( l => l.Id == linkId && l.UserId == userId );
-
-        if ( link == null )
-            return Results.NotFound( new { Message = "The link was not found or is out of date." } );
-
-        var exists = await db.Favourites.AnyAsync( f => f.LinkId == link.Id && f.UserId == userId );
-        if ( exists )
-            return Results.BadRequest( new { Message = "Link already in favourites." } );
-
-        var fav = new Favourite
-        {
-            LinkId = link.Id,
-            UserId = userId,
-            CreatedAt = DateTime.UtcNow
-        };
-
-        db.Favourites.Add( fav );
-        await db.SaveChangesAsync();
-
-        db.ActivityLogs.Add( new ActivityLog
-        {
-            LinkId = link.Id,
-            Action = $"The user {user.Identity?.Name} added the link {link.ShortUrl} to favourites",
-            CreatedAt = DateTime.UtcNow
-        } );
-        await db.SaveChangesAsync();
-
-        return Results.Ok( new { Message = "Link added to favourites." } );
-    }
-
-    private static async Task<IResult> RemoveFavouriteLink(
-        int linkId,
-        DbContext db,
-        ClaimsPrincipal user )
-    {
-        var userId = user.FindFirst( ClaimTypes.NameIdentifier )?.Value;
-        if ( string.IsNullOrEmpty( userId ) )
-            return Results.Unauthorized();
-
-        var fav = await db.Favourites
-            .FirstOrDefaultAsync( f => f.LinkId == linkId && f.UserId == userId );
-
-        if ( fav == null )
-            return Results.NotFound( new { Message = "The link is not in favourites." } );
-
-        var link = await db.Links.FindAsync( fav.LinkId );
-
-        db.Favourites.Remove( fav );
-
-        db.ActivityLogs.Add( new ActivityLog
-        {
-            LinkId = fav.LinkId,
-            Action =
-                $"The user {user.Identity?.Name} removed the link {link?.ShortUrl ?? fav.LinkId.ToString()} from favourites",
-            CreatedAt = DateTime.UtcNow
-        } );
-        await db.SaveChangesAsync();
-
-        return Results.Ok( new { Message = "Link removed from favourites." } );
-    }
-
-    private static async Task<IResult> GetCategories( DbContext db )
-    {
-        var categories = await db.Categories
-            .Select( c => new { c.Id, c.Name, LinkCount = c.Links.Count( l => !l.IsDeleted ) } )
-            .ToListAsync();
-
-        return Results.Ok( categories );
-    }
-
-    private static async Task<IResult> AddCategory(
-        string categoryName,
-        DbContext db,
-        ClaimsPrincipal user )
-    {
-        var userId = user.FindFirst( ClaimTypes.NameIdentifier )?.Value;
-        if ( string.IsNullOrEmpty( userId ) )
-            return Results.Unauthorized();
-
-        var exists = await db.Categories.AnyAsync( f => f.Name.ToLower() == categoryName.ToLower() );
-
-        if ( exists )
-            return Results.BadRequest( new { Message = "Category already exists." } );
-
-        var cat = new Category
-        {
-            Name = categoryName
-        };
-
-        db.Categories.Add( cat );
-        await db.SaveChangesAsync();
-
-        db.ActivityLogs.Add( new ActivityLog
-        {
-            LinkId = null,
-            Action = $"The user {user.Identity?.Name} created the category '{cat.Name}'",
-            CreatedAt = DateTime.UtcNow
-        } );
-        await db.SaveChangesAsync();
-
-        return Results.Created( "/api/links/categories", new { cat.Id, cat.Name } );
-    }
-
-    private static async Task<IResult> DeleteCategory(
-        int id,
-        DbContext db,
-        ClaimsPrincipal user )
-    {
-        var userId = user.FindFirst( ClaimTypes.NameIdentifier )?.Value;
-        if ( string.IsNullOrEmpty( userId ) )
-            return Results.Unauthorized();
-
-        var category = await db.Categories.FindAsync( id );
-        if ( category == null )
-            return Results.NotFound( new { Message = "Category not found." } );
-
-        await db.Links
-            .Where( l => l.CategoryId == id )
-            .ExecuteUpdateAsync( s => s.SetProperty( l => l.CategoryId, (int?)null ) );
-
-        db.Categories.Remove( category );
-
-        db.ActivityLogs.Add( new ActivityLog
-        {
-            LinkId = null,
-            Action = $"The user {user.Identity?.Name} deleted the category '{category.Name}'",
-            CreatedAt = DateTime.UtcNow
-        } );
-        await db.SaveChangesAsync();
-
-        return Results.Ok( new { Message = "Category deleted." } );
-    }
-
-    private static async Task<IResult> AssignCategory(
-        int id,
-        int? categoryId,
-        DbContext db,
-        ClaimsPrincipal user )
-    {
-        var userId = user.FindFirst( ClaimTypes.NameIdentifier )?.Value;
-        if ( string.IsNullOrEmpty( userId ) )
-            return Results.Unauthorized();
-
-        var link = await db.Links
-            .FirstOrDefaultAsync( l => l.Id == id && l.UserId == userId && !l.IsDeleted );
-
-        if ( link == null )
-            return Results.NotFound( new { Message = "The link was not found or is out of date." } );
-
-        if ( categoryId.HasValue )
-        {
-            var categoryExists = await db.Categories.AnyAsync( c => c.Id == categoryId.Value );
-            if ( !categoryExists )
-                return Results.NotFound( new { Message = "Category not found." } );
-        }
-
-        var oldCategoryId = link.CategoryId;
-        link.CategoryId = categoryId;
-
-        var actionText = categoryId.HasValue
-            ? $"The user {user.Identity?.Name} assigned category #{categoryId} to link {link.ShortUrl}"
-            : $"The user {user.Identity?.Name} removed category from link {link.ShortUrl} (was #{oldCategoryId})";
-
-        db.ActivityLogs.Add( new ActivityLog
-        {
-            LinkId = link.Id,
-            Action = actionText,
-            CreatedAt = DateTime.UtcNow
-        } );
-        await db.SaveChangesAsync();
-
-        return Results.Ok( new { Message = "Category assigned.", link.Id, link.CategoryId } );
     }
 
     private static async Task<IResult> RedirectToOriginalUrl(
