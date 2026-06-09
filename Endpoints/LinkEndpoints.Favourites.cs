@@ -31,11 +31,17 @@ public static partial class LinkEndpoints
             .Where( f => !f.Link.IsDeleted )
             .Select( f => new
             {
-                f.Id,
-                f.LinkId,
+                f.Link.Id,
+                LinkId = f.Link.Id,
                 f.Link.ShortUrl,
                 f.Link.OriginalUrl,
-                f.CreatedAt
+                f.Link.CreatedAt,
+                f.Link.ExpiresAt,
+                f.Link.IsPublic,
+                Category = f.Link.Category == null ? null : f.Link.Category.Name,
+                ClickCount = f.Link.LinkClicks.Count,
+                IsFavourite = true,
+                CategoryId = f.Link.CategoryId
             } )
             .ToListAsync();
 

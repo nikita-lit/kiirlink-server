@@ -116,7 +116,10 @@ public static partial class LinkEndpoints
                 l.ExpiresAt,
                 l.IsPublic,
                 Category = l.Category == null ? null : l.Category.Name,
-                ClickCount = l.LinkClicks.Count
+                CategoryId = l.CategoryId,
+                ClickCount = l.LinkClicks.Count,
+                IsFavourite = l.Favourites.Any( f => f.UserId == userId ),
+                Favourites = l.Favourites.Count
             } )
             .ToListAsync();
 
@@ -185,16 +188,20 @@ public static partial class LinkEndpoints
             FavouritesCount = link.Favourites.Count,
             ByDate = link.LinkClicks
                 .GroupBy( c => c.ClickedAt.Date )
-                .Select( g => new { Date = g.Key.ToString( "yyyy-MM-dd" ), Count = g.Count() } ),
+                .Select( g => new { Date = g.Key.ToString( "yyyy-MM-dd" ), Count = g.Count() } )
+                .ToList(),
             ByDevice = link.LinkClicks
                 .GroupBy( c => c.DeviceType )
-                .Select( g => new { Device = g.Key, Count = g.Count() } ),
+                .Select( g => new { Device = g.Key, Count = g.Count() } )
+                .ToList(),
             BySource = link.LinkClicks
                 .GroupBy( c => c.Source )
-                .Select( g => new { Source = g.Key, Count = g.Count() } ),
+                .Select( g => new { Source = g.Key, Count = g.Count() } )
+                .ToList(),
             ByCountry = link.LinkClicks
                 .GroupBy( c => c.Country )
                 .Select( g => new { Country = g.Key, Count = g.Count() } )
+                .ToList()
         };
 
         return Results.Ok( stats );
@@ -217,19 +224,19 @@ public static partial class LinkEndpoints
             .Where( c => c.LinkId == id )
             .Select( c => new
             {
-                Type = "Click",
+                Type = "click",
                 Description = $"Clicked from {c.DeviceType ?? "unknown device"} in {c.Country ?? "unknown country"}",
-                Date = c.ClickedAt
+                Timestamp = c.ClickedAt
             } )
             .ToListAsync();
 
         var activities = await db.ActivityLogs
             .Where( a => a.LinkId == id )
-            .Select( a => new { Type = "Activity", Description = a.Action, Date = a.CreatedAt } )
+            .Select( a => new { Type = "activity", Description = a.Action, Timestamp = a.CreatedAt } )
             .ToListAsync();
 
         var history = clicks.Concat( activities )
-            .OrderByDescending( x => x.Date )
+            .OrderByDescending( x => x.Timestamp )
             .Take( 50 )
             .ToList();
 
