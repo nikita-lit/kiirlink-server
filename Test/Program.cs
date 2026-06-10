@@ -271,6 +271,33 @@ if ( shortUrl is not null )
     {
         Fail("POST /api/links/shorten (expired)", $"failed to create expired link: {(int)expStatus}");
     }
+
+    // Private link test
+    var (privateStatus, privateBody) =
+        await POST("/api/links/shorten?originalUrl=https://example.com/private&isPublic=false");
+    if (privateStatus == HttpStatusCode.Created && privateBody.HasValue)
+    {
+        var privateAlias = privateBody.Value.GetProperty("shortUrl").GetString();
+        var (anonymousPrivateStatus, _) = await GET($"/{privateAlias}", false);
+        var (ownerPrivateStatus, _) = await GET($"/{privateAlias}");
+
+        if (anonymousPrivateStatus == HttpStatusCode.NotFound)
+            Pass($"GET /{privateAlias} (private, anonymous)  →  404 (correct)");
+        else
+            Fail($"GET /{privateAlias} (private, anonymous)",
+                $"expected 404, got {(int)anonymousPrivateStatus}");
+
+        if (ownerPrivateStatus is HttpStatusCode.MovedPermanently or HttpStatusCode.Found
+            or HttpStatusCode.PermanentRedirect or HttpStatusCode.TemporaryRedirect)
+            Pass($"GET /{privateAlias} (private, owner)  →  {(int)ownerPrivateStatus} redirect");
+        else
+            Fail($"GET /{privateAlias} (private, owner)",
+                $"expected 3xx, got {(int)ownerPrivateStatus}");
+    }
+    else
+    {
+        Fail("POST /api/links/shorten (private)", $"failed to create private link: {(int)privateStatus}");
+    }
 }
 else
 {

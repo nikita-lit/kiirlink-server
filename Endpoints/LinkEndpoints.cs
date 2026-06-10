@@ -260,6 +260,13 @@ public static partial class LinkEndpoints
         if ( link == null || link.IsDeleted )
             return Results.NotFound();
 
+        if ( !link.IsPublic )
+        {
+            var userId = httpContext.User.FindFirst( ClaimTypes.NameIdentifier )?.Value;
+            if ( string.IsNullOrEmpty(userId) || !string.Equals(userId, link.UserId, StringComparison.Ordinal) )
+                return Results.NotFound();
+        }
+
         if ( link.ExpiresAt.HasValue && link.ExpiresAt.Value < DateTime.UtcNow )
             return Results.StatusCode( 410 );
 
