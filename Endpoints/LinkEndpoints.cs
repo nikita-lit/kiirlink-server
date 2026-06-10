@@ -27,10 +27,10 @@ public static partial class LinkEndpoints
 
         group.MapGet( "/{id:int}/activity", GetLinkActivity )
             .WithName( "GetLinkActivity" );
-        
+
         MapFavouritesEndpoints( group );
         MapCategoriesEndpoints( group );
-        
+
         app.MapGet( "/{shortUrl}", RedirectToOriginalUrl )
             .WithName( "RedirectToOriginalUrl" )
             .WithTags( "Links" );
@@ -40,6 +40,7 @@ public static partial class LinkEndpoints
         string originalUrl,
         DateTime? expiresAt,
         bool? isPublic,
+        int? categoryId,
         DbContext db,
         ClaimsPrincipal user )
     {
@@ -50,6 +51,10 @@ public static partial class LinkEndpoints
         if ( !Uri.TryCreate( originalUrl, UriKind.Absolute, out var uriResult ) ||
              (uriResult.Scheme != Uri.UriSchemeHttp && uriResult.Scheme != Uri.UriSchemeHttps) )
             return Results.BadRequest( new { Message = "Invalid URL format." } );
+
+        if ( categoryId.HasValue &&
+             !await db.Categories.AnyAsync( category => category.Id == categoryId.Value ) )
+            return Results.BadRequest( new { Message = "Default category was not found." } );
 
         var shortUrl = Guid.NewGuid().ToString( "N" )[..6];
         while ( await db.Links.AnyAsync( l => l.ShortUrl == shortUrl ) )
@@ -62,7 +67,8 @@ public static partial class LinkEndpoints
             UserId = userId,
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = expiresAt,
-            IsPublic = isPublic ?? false
+            IsPublic = isPublic ?? false,
+            CategoryId = categoryId
         };
 
         db.Links.Add( newLink );
@@ -78,7 +84,7 @@ public static partial class LinkEndpoints
         await db.SaveChangesAsync();
 
         return Results.Created( $"/api/links/{shortUrl}",
-            new { newLink.ShortUrl, newLink.OriginalUrl, newLink.CreatedAt } );
+            new { newLink.Id, newLink.ShortUrl, newLink.OriginalUrl, newLink.CreatedAt, newLink.CategoryId } );
     }
 
     private static async Task<IResult> GetShortUrls(
@@ -116,7 +122,7 @@ public static partial class LinkEndpoints
                 l.ExpiresAt,
                 l.IsPublic,
                 Category = l.Category == null ? null : l.Category.Name,
-                CategoryId = l.CategoryId,
+                l.CategoryId,
                 ClickCount = l.LinkClicks.Count,
                 IsFavourite = l.Favourites.Any( f => f.UserId == userId ),
                 Favourites = l.Favourites.Count
